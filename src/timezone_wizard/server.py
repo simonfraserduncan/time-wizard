@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta
 from enum import Enum
 import json
+import base64
 from typing import Sequence
+import urllib.parse
 
 from zoneinfo import ZoneInfo
 from mcp.server import Server
@@ -33,6 +35,10 @@ class TimeConversionInput(BaseModel):
     source_tz: str
     time: str
     target_tz_list: list[str]
+
+
+class Config(BaseModel):
+    local_timezone: str | None = None
 
 
 def get_local_tz(local_tz_override: str | None = None) -> ZoneInfo:
@@ -124,9 +130,41 @@ class TimeServer:
         )
 
 
+def parse_config_from_query(query_string: str | None) -> Config:
+    """Parse configuration from query parameters"""
+    config = Config()
+    if not query_string:
+        return config
+    
+    # Parse the query string
+    query_params = urllib.parse.parse_qs(query_string)
+    
+    # Check for Smithery's base64-encoded config
+    if "config" in query_params:
+        try:
+            # Decode base64 config
+            encoded_config = query_params["config"][0]
+            decoded_config = base64.b64decode(encoded_config).decode("utf-8")
+            config_dict = json.loads(decoded_config)
+            
+            # Update config object with values from the decoded config
+            if "local_timezone" in config_dict:
+                config.local_timezone = config_dict["local_timezone"]
+        except Exception as e:
+            print(f"Error parsing config: {e}")
+    
+    # Also support direct query parameters for testing
+    if "local_timezone" in query_params:
+        config.local_timezone = query_params["local_timezone"][0]
+    
+    return config
+
+
 async def serve(local_timezone: str | None = None, host: str = "0.0.0.0", port: int = 8000) -> None:
     """Start the timezone-wizard MCP server"""
     time_server = TimeServer()
+    
+    # Initial default local timezone
     local_tz = str(get_local_tz(local_timezone))
     
     # Create a FastMCP app
@@ -158,6 +196,63 @@ async def serve(local_timezone: str | None = None, host: str = "0.0.0.0", port: 
             target_timezone
         )
         return result.model_dump()
+    
+    # Add custom route to handle the root /mcp endpoint with config
+    from starlette.requests import Request
+    from starlette.responses import JSONResponse
+    
+    @app.custom_route("/mcp", methods=["GET", "POST", "DELETE"], name="mcp_root")
+    async def mcp_root(request: Request):
+        """Handle requests to the base /mcp endpoint as required by Smithery"""
+        try:
+            # Parse config from query string
+            config = parse_config_from_query(request.url.query)
+            
+            # Update local timezone if specified in config
+            nonlocal local_tz
+            if config.local_timezone:
+                local_tz = str(get_local_tz(config.local_timezone))
+                print(f"Using configured timezone: {local_tz}")
+            
+            # For GET requests, return available tools
+            if request.method == "GET":
+                # Create a simple serializable list of tool information
+                tools_info = [
+                    {
+                        "name": TimeTools.GET_CURRENT_TIME.value,
+                        "description": "Get current time in a specific timezone",
+                        "parameters": {
+                            "timezone": {"type": "string", "description": "Timezone name (e.g., 'America/New_York')"}
+                        }
+                    },
+                    {
+                        "name": TimeTools.CONVERT_TIME.value,
+                        "description": "Convert time between timezones",
+                        "parameters": {
+                            "source_timezone": {"type": "string", "description": "Source timezone name"},
+                            "time": {"type": "string", "description": "Time in HH:MM format (24-hour)"},
+                            "target_timezone": {"type": "string", "description": "Target timezone name"}
+                        }
+                    }
+                ]
+                return JSONResponse({"tools": tools_info})
+            
+            # For POST/DELETE requests, we'll use a simpler approach that just returns status
+            if request.method == "POST":
+                # In a real implementation, this would route the request to the appropriate tool
+                return JSONResponse({"status": "ok", "message": "POST request received"})
+                
+            if request.method == "DELETE":
+                return JSONResponse({"status": "ok", "message": "DELETE request received"})
+                
+            return JSONResponse({"status": "error", "message": "Unsupported method"}, status_code=405)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return JSONResponse(
+                {"status": "error", "message": f"Server error: {str(e)}"}, 
+                status_code=500
+            )
     
     # Start the server using Uvicorn with the correct app
     print(f"Starting timezone-wizard server on {host}:{port}...")
