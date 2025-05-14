@@ -1,13 +1,13 @@
 [project]
 name = "timezone-wizard"
 version = "0.1.0"
-description = "A Model Context Protocol server providing advanced timezone conversions and calendar utilities for LLMs"
+description = "A Model Context Protocol server for timezone and calendar utilities"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
     { name = "Simon Duncan" },
 ]
-keywords = ["timezone", "calendar", "mcp", "llm"]
+keywords = ["timezone", "calendar", "mcp", "llm", "wizard"]
 license = { text = "MIT" }
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -35,4 +35,7 @@ dev-dependencies = [
     "pyright>=1.1.389",
     "pytest>=8.3.3",
     "ruff>=0.8.1",
-] 
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/timezone_wizard"]

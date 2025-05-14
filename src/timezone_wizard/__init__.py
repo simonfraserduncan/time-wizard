@@ -12,9 +12,8 @@ def main():
     parser.add_argument("--local-timezone", type=str, help="Override local timezone")
 
     args = parser.parse_args()
-    # Run the serve function with the parsed arguments
-    asyncio.run(serve(local_timezone_override=args.local_timezone))
+    asyncio.run(serve(args.local_timezone))
 
 
 if __name__ == "__main__":
-    main() 
+    main()

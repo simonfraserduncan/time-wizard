@@ -1,5 +1,6 @@
 # Smithery configuration file: https://smithery.ai/docs/deployments
 
+version: 1
 build:
   dockerBuildPath: .
 
