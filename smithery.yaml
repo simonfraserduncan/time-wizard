@@ -21,4 +21,8 @@ startCommand:
       }
       return { command: args[0], args: args.slice(1) };
     }
-  type: http 
+  type: http
+  http:
+    port: 8000
+    basePath: /mcp
+    healthCheckPath: /mcp 
