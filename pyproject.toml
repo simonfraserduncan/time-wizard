@@ -1,0 +1,38 @@
+[project]
+name = "timezone-wizard"
+version = "0.1.0"
+description = "A Model Context Protocol server providing advanced timezone conversions and calendar utilities for LLMs"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "Simon Duncan" },
+]
+keywords = ["timezone", "calendar", "mcp", "llm"]
+license = { text = "MIT" }
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+]
+dependencies = [
+    "mcp>=1.0.0",
+    "pydantic>=2.0.0",
+    "tzdata>=2024.2",
+]
+
+[project.scripts]
+timezone-wizard = "timezone_wizard:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = [
+    "freezegun>=1.5.1",
+    "pyright>=1.1.389",
+    "pytest>=8.3.3",
+    "ruff>=0.8.1",
+] 
