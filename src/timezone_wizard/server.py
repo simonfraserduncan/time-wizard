@@ -201,10 +201,36 @@ async def serve(local_timezone: str | None = None, host: str = "0.0.0.0", port: 
     from starlette.requests import Request
     from starlette.responses import JSONResponse
     
+    # Define static tool descriptions for lazy loading
+    TOOL_DESCRIPTIONS = [
+        {
+            "name": TimeTools.GET_CURRENT_TIME.value,
+            "description": "Get current time in a specific timezone",
+            "parameters": {
+                "timezone": {"type": "string", "description": "Timezone name (e.g., 'America/New_York')"}
+            }
+        },
+        {
+            "name": TimeTools.CONVERT_TIME.value,
+            "description": "Convert time between timezones",
+            "parameters": {
+                "source_timezone": {"type": "string", "description": "Source timezone name"},
+                "time": {"type": "string", "description": "Time in HH:MM format (24-hour)"},
+                "target_timezone": {"type": "string", "description": "Target timezone name"}
+            }
+        }
+    ]
+
     @app.custom_route("/mcp", methods=["GET", "POST", "DELETE"], name="mcp_root")
     async def mcp_root(request: Request):
         """Handle requests to the base /mcp endpoint as required by Smithery"""
         try:
+            # For GET requests, return available tools WITHOUT ANY config processing
+            # This is critical for "lazy loading" as required by Smithery
+            if request.method == "GET":
+                return JSONResponse({"tools": TOOL_DESCRIPTIONS})
+            
+            # Only process configuration for actual tool usage (POST/DELETE)
             # Parse config from query string
             config = parse_config_from_query(request.url.query)
             
@@ -214,28 +240,6 @@ async def serve(local_timezone: str | None = None, host: str = "0.0.0.0", port: 
                 local_tz = str(get_local_tz(config.local_timezone))
                 print(f"Using configured timezone: {local_tz}")
             
-            # For GET requests, return available tools
-            if request.method == "GET":
-                # Create a simple serializable list of tool information
-                tools_info = [
-                    {
-                        "name": TimeTools.GET_CURRENT_TIME.value,
-                        "description": "Get current time in a specific timezone",
-                        "parameters": {
-                            "timezone": {"type": "string", "description": "Timezone name (e.g., 'America/New_York')"}
-                        }
-                    },
-                    {
-                        "name": TimeTools.CONVERT_TIME.value,
-                        "description": "Convert time between timezones",
-                        "parameters": {
-                            "source_timezone": {"type": "string", "description": "Source timezone name"},
-                            "time": {"type": "string", "description": "Time in HH:MM format (24-hour)"},
-                            "target_timezone": {"type": "string", "description": "Target timezone name"}
-                        }
-                    }
-                ]
-                return JSONResponse({"tools": tools_info})
             
             # For POST/DELETE requests, we'll use a simpler approach that just returns status
             if request.method == "POST":
@@ -254,6 +258,12 @@ async def serve(local_timezone: str | None = None, host: str = "0.0.0.0", port: 
                 status_code=500
             )
     
+    # Add a simple health check endpoint
+    @app.custom_route("/health", methods=["GET"], name="health_check")
+    async def health_check(request: Request):
+        """Simple health check endpoint"""
+        return JSONResponse({"status": "ok"})
+
     # Start the server using Uvicorn with the correct app
     print(f"Starting timezone-wizard server on {host}:{port}...")
     import uvicorn
