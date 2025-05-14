@@ -10,17 +10,15 @@ ENV UV_COMPILE_BYTECODE=1
 # Copy from the cache instead of linking since it's a mounted volume
 ENV UV_LINK_MODE=copy
 
-# Install the project's dependencies using the lockfile and settings
-RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project --no-dev --no-editable
+# Copy project files first
+COPY pyproject.toml .
 
-# Then, add the rest of the project source code and install it
-# Installing separately from its dependencies allows optimal layer caching
-ADD . /app
+# Install dependencies without using the frozen lockfile
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-editable
+    uv pip install --no-deps -e .
+
+# Then, add the rest of the project source code
+ADD . /app
 
 FROM python:3.12-slim-bookworm
 
@@ -30,11 +28,10 @@ WORKDIR /app
 RUN groupadd -r app && useradd -r -g app app
 
 COPY --from=uv /root/.local /root/.local
-COPY --from=uv /app/.venv /app/.venv
 COPY --from=uv /app /app
 
 # Place executables in the environment at the front of the path
-ENV PATH="/app/.venv/bin:$PATH"
+ENV PATH="/root/.local/bin:$PATH"
 
 # Set proper ownership
 RUN chown -R app:app /app
