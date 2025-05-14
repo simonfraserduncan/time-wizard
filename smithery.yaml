@@ -1,4 +1,4 @@
 version: 1
 start:
-  command: ["timezone-wizard"]
+  command: timezone-wizard
   port: 8000 
