@@ -1,4 +1,24 @@
-version: 1
-start:
-  command: timezone-wizard
-  port: 8000 
+# Smithery configuration file: https://smithery.ai/docs/deployments
+
+build:
+  dockerBuildPath: .
+
+startCommand:
+  configSchema:
+    # JSON Schema defining the configuration options for the MCP
+    type: object
+    properties:
+      local_timezone:
+        type: string
+        description: Optional override for the local timezone (e.g., 'America/New_York')
+  commandFunction:
+    # Function that produces the CLI command to start the MCP
+    |-
+    (config) => {
+      const args = ['timezone-wizard'];
+      if (config && config.local_timezone) {
+        args.push('--local-timezone', config.local_timezone);
+      }
+      return { command: args[0], args: args.slice(1) };
+    }
+  type: http 
