@@ -21,8 +21,5 @@ startCommand:
       }
       return { command: args[0], args: args.slice(1) };
     }
-  type: http
-  http:
-    port: 8000
-    basePath: /mcp
-    healthCheckPath: /mcp 
+  # type: stdio # Implicitly stdio if not http
+  # Removed http block as it's no longer an http server 

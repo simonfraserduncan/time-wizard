@@ -1,13 +1,12 @@
 from datetime import datetime, timedelta
 from enum import Enum
 import json
-import base64
 from typing import Sequence
-import urllib.parse
+import asyncio # Added asyncio for the serve function
 
 from zoneinfo import ZoneInfo
 from mcp.server import Server
-from mcp.server.fastmcp import FastMCP
+from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent, ImageContent, EmbeddedResource
 from mcp.shared.exceptions import McpError
 
@@ -31,15 +30,7 @@ class TimeConversionResult(BaseModel):
     time_difference: str
 
 
-class TimeConversionInput(BaseModel):
-    source_tz: str
-    time: str
-    target_tz_list: list[str]
-
-
-class Config(BaseModel):
-    local_timezone: str | None = None
-
+# Removed TimeConversionInput as it wasn't used in the stdio reference server.py
 
 def get_local_tz(local_tz_override: str | None = None) -> ZoneInfo:
     if local_tz_override:
@@ -112,7 +103,7 @@ class TimeServer:
         if hours_difference.is_integer():
             time_diff_str = f"{hours_difference:+.1f}h"
         else:
-            # For fractional hours like Nepal\'s UTC+5:45
+            # For fractional hours like Nepal's UTC+5:45
             time_diff_str = f"{hours_difference:+.2f}".rstrip("0").rstrip(".") + "h"
 
         return TimeConversionResult(
@@ -130,143 +121,102 @@ class TimeServer:
         )
 
 
-def parse_config_from_query(query_string: str | None) -> Config:
-    """Parse configuration from query parameters"""
-    config = Config()
-    if not query_string:
-        return config
-    
-    # Parse the query string
-    query_params = urllib.parse.parse_qs(query_string)
-    
-    # Check for Smithery's base64-encoded config
-    if "config" in query_params:
+async def serve(local_timezone_override: str | None = None) -> None: # Renamed local_timezone to local_timezone_override
+    server = Server("timezone-wizard") # Changed server name
+    time_wizard_server = TimeServer() # Changed variable name
+    local_tz = str(get_local_tz(local_timezone_override))
+
+    @server.list_tools()
+    async def list_tools() -> list[Tool]:
+        """List available time tools."""
+        return [
+            Tool(
+                name=TimeTools.GET_CURRENT_TIME.value,
+                description="Get current time in a specific timezone", # Adjusted description
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "timezone": {
+                            "type": "string",
+                            "description": f"IANA timezone name (e.g., 'America/New_York', 'Europe/London'). Use '{local_tz}' as local timezone if no timezone provided by the user.",
+                        }
+                    },
+                    "required": ["timezone"],
+                },
+            ),
+            Tool(
+                name=TimeTools.CONVERT_TIME.value,
+                description="Convert time between timezones",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "source_timezone": {
+                            "type": "string",
+                            "description": f"Source IANA timezone name (e.g., 'America/New_York', 'Europe/London'). Use '{local_tz}' as local timezone if no source timezone provided by the user.",
+                        },
+                        "time": {
+                            "type": "string",
+                            "description": "Time to convert in 24-hour format (HH:MM)",
+                        },
+                        "target_timezone": {
+                            "type": "string",
+                            "description": f"Target IANA timezone name (e.g., 'Asia/Tokyo', 'America/San_Francisco'). Use '{local_tz}' as local timezone if no target timezone provided by the user.",
+                        },
+                    },
+                    "required": ["source_timezone", "time", "target_timezone"],
+                },
+            ),
+        ]
+
+    @server.call_tool()
+    async def call_tool(
+        name: str, arguments: dict
+    ) -> Sequence[TextContent | ImageContent | EmbeddedResource]:
+        """Handle tool calls for time queries."""
         try:
-            # Decode base64 config
-            encoded_config = query_params["config"][0]
-            decoded_config = base64.b64decode(encoded_config).decode("utf-8")
-            config_dict = json.loads(decoded_config)
-            
-            # Update config object with values from the decoded config
-            if "local_timezone" in config_dict:
-                config.local_timezone = config_dict["local_timezone"]
+            match name:
+                case TimeTools.GET_CURRENT_TIME.value:
+                    timezone = arguments.get("timezone")
+                    if not timezone:
+                        # Default to local_tz if no timezone is provided.
+                        # This aligns with the description in list_tools.
+                        timezone = local_tz 
+                    result = time_wizard_server.get_current_time(timezone)
+
+                case TimeTools.CONVERT_TIME.value:
+                    source_timezone = arguments.get("source_timezone")
+                    time_arg = arguments.get("time") # Renamed from time to time_arg
+                    target_timezone = arguments.get("target_timezone")
+
+                    if not source_timezone:
+                        source_timezone = local_tz
+                    if not time_arg:
+                        raise ValueError("Missing required argument: time")
+                    if not target_timezone:
+                        # Default target to local_tz if not provided, or handle as error.
+                        # For now, let's require it as per the schema, but this could be a design choice.
+                        raise ValueError("Missing required argument: target_timezone")
+                        
+                    result = time_wizard_server.convert_time(
+                        source_timezone,
+                        time_arg,
+                        target_timezone,
+                    )
+                case _:
+                    raise ValueError(f"Unknown tool: {name}")
+
+            return [
+                TextContent(type="text", text=json.dumps(result.model_dump(), indent=2))
+            ]
+
         except Exception as e:
-            print(f"Error parsing config: {e}")
-    
-    # Also support direct query parameters for testing
-    if "local_timezone" in query_params:
-        config.local_timezone = query_params["local_timezone"][0]
-    
-    return config
+            # More specific error for user
+            raise McpError(f"Error processing timezone-wizard query for tool '{name}': {str(e)}")
 
+    options = server.create_initialization_options()
+    async with stdio_server() as (read_stream, write_stream):
+        await server.run(read_stream, write_stream, options)
 
-async def serve(local_timezone: str | None = None, host: str = "0.0.0.0", port: int = 8000) -> None:
-    """Start the timezone-wizard MCP server"""
-    time_server = TimeServer()
-    
-    # Initial default local timezone
-    local_tz = str(get_local_tz(local_timezone))
-    
-    # Create a FastMCP app
-    app = FastMCP(name="timezone-wizard")
-    
-    # Register tools
-    @app.tool(
-        name=TimeTools.GET_CURRENT_TIME.value,
-        description="Get current time in a specific timezone"
-    )
-    async def get_current_time(timezone: str) -> dict:
-        """Get current time in specified timezone"""
-        result = time_server.get_current_time(timezone)
-        return result.model_dump()
-    
-    @app.tool(
-        name=TimeTools.CONVERT_TIME.value,
-        description="Convert time between timezones"
-    )
-    async def convert_time(
-        source_timezone: str,
-        time: str,
-        target_timezone: str
-    ) -> dict:
-        """Convert time between timezones"""
-        result = time_server.convert_time(
-            source_timezone,
-            time,
-            target_timezone
-        )
-        return result.model_dump()
-    
-    # Add custom route to handle the root /mcp endpoint with config
-    from starlette.requests import Request
-    from starlette.responses import JSONResponse
-    
-    # Define static tool descriptions for lazy loading
-    TOOL_DESCRIPTIONS = [
-        {
-            "name": TimeTools.GET_CURRENT_TIME.value,
-            "description": "Get current time in a specific timezone",
-            "parameters": {
-                "timezone": {"type": "string", "description": "Timezone name (e.g., 'America/New_York')"}
-            }
-        },
-        {
-            "name": TimeTools.CONVERT_TIME.value,
-            "description": "Convert time between timezones",
-            "parameters": {
-                "source_timezone": {"type": "string", "description": "Source timezone name"},
-                "time": {"type": "string", "description": "Time in HH:MM format (24-hour)"},
-                "target_timezone": {"type": "string", "description": "Target timezone name"}
-            }
-        }
-    ]
-
-    @app.custom_route("/mcp", methods=["GET", "POST", "DELETE"], name="mcp_root")
-    async def mcp_root(request: Request):
-        """Handle requests to the base /mcp endpoint as required by Smithery"""
-        try:
-            # For GET requests, return available tools WITHOUT ANY config processing
-            # This is critical for "lazy loading" as required by Smithery
-            if request.method == "GET" or request.method == "POST":
-                return JSONResponse({"tools": TOOL_DESCRIPTIONS})
-            
-            # Only process configuration for actual tool usage (POST/DELETE)
-            # Parse config from query string
-            config = parse_config_from_query(request.url.query)
-            
-            # Update local timezone if specified in config
-            nonlocal local_tz
-            if config.local_timezone:
-                local_tz = str(get_local_tz(config.local_timezone))
-                print(f"Using configured timezone: {local_tz}")
-            
-            
-            # For POST/DELETE requests, we'll use a simpler approach that just returns status
-                
-            if request.method == "DELETE":
-                return JSONResponse({"status": "ok", "message": "DELETE request received"})
-                
-            return JSONResponse({"status": "error", "message": "Unsupported method"}, status_code=405)
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            return JSONResponse(
-                {"status": "error", "message": f"Server error: {str(e)}"}, 
-                status_code=500
-            )
-    
-    # Add a simple health check endpoint
-    @app.custom_route("/health", methods=["GET"], name="health_check")
-    async def health_check(request: Request):
-        """Simple health check endpoint"""
-        return JSONResponse({"status": "ok"})
-
-    # Start the server using Uvicorn with the correct app
-    print(f"Starting timezone-wizard server on {host}:{port}...")
-    import uvicorn
-    # Get the ASGI application from FastMCP
-    asgi_app = app.streamable_http_app()
-    # Configure and start Uvicorn
-    config = uvicorn.Config(asgi_app, host=host, port=port)
-    server = uvicorn.Server(config)
-    await server.serve() 
+# If running this script directly (optional, for local testing)
+if __name__ == "__main__":
+    asyncio.run(serve()) 
