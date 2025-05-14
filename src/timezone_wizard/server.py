@@ -227,7 +227,7 @@ async def serve(local_timezone: str | None = None, host: str = "0.0.0.0", port: 
         try:
             # For GET requests, return available tools WITHOUT ANY config processing
             # This is critical for "lazy loading" as required by Smithery
-            if request.method == "GET":
+            if request.method == "GET" or request.method == "POST":
                 return JSONResponse({"tools": TOOL_DESCRIPTIONS})
             
             # Only process configuration for actual tool usage (POST/DELETE)
@@ -242,9 +242,6 @@ async def serve(local_timezone: str | None = None, host: str = "0.0.0.0", port: 
             
             
             # For POST/DELETE requests, we'll use a simpler approach that just returns status
-            if request.method == "POST":
-                # In a real implementation, this would route the request to the appropriate tool
-                return JSONResponse({"status": "ok", "message": "POST request received"})
                 
             if request.method == "DELETE":
                 return JSONResponse({"status": "ok", "message": "DELETE request received"})
